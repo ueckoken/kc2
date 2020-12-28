@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="card">
+	<div class="card-header">
+		<h1 class="card-title">インスタンス作成</h1>
+	</div>
+	<div class="card-body">
+		<form action="/instances" method="POST">
+			<div class="form-group row mb-3">
+				<label for="image_alias" class="form-label col-3 col-form-label">
+					OS
+				</label>
+				<div class="col">
+					<select name="image_alias" class="form-select">
+						{% for image in images %}
+						<option value="{{ image.aliases[0] }}">{{ image.os }} {{ image.release_title }}</option>
+						{% endfor %}
+					</select>
+				</div>
+			</div>
+			<div class="form-group row mb-3">
+				<label for="name" class="form-label col-3 col-form-label">
+					インスタンス名
+				</label>
+				<div class="col">
+					<input name="name" pattern="[a-zA-Z][a-zA-Z-]*" required class="form-control">
+				</div>
+			</div>
+			<div class="form-group row mb-3">
+				<label for="default_user_name" class="form-label col-3 col-form-label">
+					初期ユーザー名
+				</label>
+				<div class="col">
+					<input name="default_user_name" required class="form-control">
+				</div>
+			</div>
+			<div class="form-group row">
+				<label for="default_user_passwd" class="form-label col-3 col-form-label">
+					初期ユーザーパスワード
+				</label>
+				<div class="col">
+					<input name="default_user_passwd" required type="password" class="form-control">
+				</div>
+			</div>
+			<div class="form-footer">
+				<button type="submit" class="btn btn-primary">作成</button>
+			</div>
+		</form>
+	</div>
+</div>
+{% endblock %}

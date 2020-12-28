@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="card">
+	<div class="card-header">
+		<h1 class="card-title">インスタンス ({{ containers | length }})</h1>
+	</div>
+	<div class="card-body text-end">
+		<a href="/instances" class="btn">↻</a>
+		<a href="/instances/new" class="btn btn-primary ml-auto">作成</a>
+	</div>
+	<table class="table card-table">
+		<thead>
+			<th>状態</th>
+			<th>インスタンス名</th>
+			<th>IPv4アドレス</th>
+			<th></th>
+		</thead>
+		<tbody>
+			{% for container in containers %}
+			<tr>
+				<td>
+					{% if container.running %}
+					<span class="badge rounded-pill bg-success">
+					{% elif container.stopped %}
+					<span class="badge rounded-pill bg-secondary">
+					{% else %}
+					<span class="badge rounded-pill">
+					{% endif %}
+						{{ container.status | lower }}
+					</span>
+				</td>
+				<td>{{ container.name }}</td>
+				<td>
+					<ul class="list-group mb-0" style="list-style-type: none;">
+						{% for address in container.addresses %}
+						<li>{{ address.address }}/{{ address.netmask }}</li>
+						{% endfor %}
+					</ul>
+				</td>
+				<td class="text-right">
+					<span class="dropdown">
+						<button class="btn btn-sm dropdown-toggle align-text-top" data-bs-boundary="viewport" data-bs-toggle="dropdown">操作</button>
+						<div class="dropdown-menu dropdown-menu-end" style="margin: 0px;">
+							<form action="/instances/{{ container.name }}/start" method="POST" style="display: contents;">
+								{% if container.running %}
+								<button class="dropdown-item" disabled>
+								{% else %}
+								<button class="dropdown-item">
+								{% endif %}
+									開始
+								</button>
+							</form>
+							<form action="/instances/{{ container.name }}/stop" method="POST" style="display: contents;">
+								{% if container.stopped %}
+								<button class="dropdown-item" disabled>
+								{% else %}
+								<button class="dropdown-item">
+								{% endif %}
+									停止
+								</button>
+							</form>
+							<form action="/instances/{{ container.name }}/restart" method="POST" style="display: contents;">
+								{% if container.stopped %}
+								<button class="dropdown-item" disabled>
+								{% else %}
+								<button class="dropdown-item">
+								{% endif %}
+									再起動
+								</button>
+							</form>
+							<form action="/instances/{{ container.name }}/destroy" method="POST" style="display: contents;">
+								{% if container.running %}
+								<button class="dropdown-item btn-outline-danger" disabled>
+								{% else %}
+								<button class="dropdown-item btn-outline-danger">
+								{% endif %}
+									消去
+								</button>
+							</form>
+						</div>
+					</span>
+				</td>
+			</tr>
+			{% endfor %}
+		</tbody>
+	</table>
+</div>
+
+{% endblock %}
