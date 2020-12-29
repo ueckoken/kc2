@@ -1,3 +1,4 @@
+from base64 import b64encode
 import crypt
 from enum import Enum
 from dataclasses import dataclass
@@ -16,7 +17,6 @@ templates = Jinja2Templates(directory="templates")
 
 client = Client()
 
-
 # linuxcontainer.org image server is defined but not supported
 # some images on this server does not contain OpenSSH Server by default
 LINUXCONTAINER_IMAGE_SERVER = "https://images.linuxcontainers.org"
@@ -25,9 +25,6 @@ UBUNTU_IMAGE_SERVER = "https://cloud-images.ubuntu.com/releases"
 DEFAULT_IMAGE_SERVER = UBUNTU_IMAGE_SERVER
 
 DEFAULT_ARCH = "amd64"
-
-UEC_HTTP_PROXY = "http://proxy.uec.ac.jp:8080/"
-UEC_NO_PROXY = "localhost,192.168.0.0/16,172.16.0.0/12,10.0.0.0/8,130.153.0.0/16"
 
 CLOUDINIT_USERDATA = """
 #cloud-config
@@ -40,18 +37,62 @@ ssh_pwauth: true
 
 write_files:
 - content: |
-    http_proxy={http_proxy}
-    https_proxy={http_proxy}
-    ftp_proxy={http_proxy}
-    no_proxy="{no_proxy}"
-    HTTP_PROXY={http_proxy}
-    HTTPS_PROXY={http_proxy}
-    FTP_PROXY={http_proxy}
-    NO_PROXY="{no_proxy}"
-  path: /etc/environment
-  append: true
+    proxy_url = "socks5://socks.cc.uec.ac.jp:1080"
+  path: /etc/transocks.toml
   owner: root:root
   permissions: '0644'
+- content: |
+    [Unit]
+    Description=transocks: Transparent SOCKS5 proxy
+    Documentation=https://github.com/cybozu-go/transocks
+    After=network.target
+
+    [Service]
+    ExecStart=/usr/local/bin/transocks
+
+    [Install]
+    WantedBy=multi-user.target
+  path: /etc/systemd/system/transocks.service
+  owner: root:root
+  permissions: '0644'
+- content: |
+    *nat
+    -F
+
+    :PREROUTING ACCEPT [0:0]
+    :INPUT ACCEPT [0:0]
+    :OUTPUT ACCEPT [0:0]
+    :POSTROUTING ACCEPT [0:0]
+    :TRANSOCKS - [0:0]
+    -A OUTPUT -j TRANSOCKS
+    -A TRANSOCKS -d 0.0.0.0/8 -j RETURN
+    -A TRANSOCKS -d 10.0.0.0/8 -j RETURN
+    -A TRANSOCKS -d 127.0.0.0/8 -j RETURN
+    -A TRANSOCKS -d 169.254.0.0/16 -j RETURN
+    -A TRANSOCKS -d 172.16.0.0/12 -j RETURN
+    -A TRANSOCKS -d 192.168.0.0/16 -j RETURN
+    -A TRANSOCKS -d 224.0.0.0/4 -j RETURN
+    -A TRANSOCKS -d 240.0.0.0/4 -j RETURN
+    -A TRANSOCKS -d 130.153.0.0/16 -j RETURN
+    -A TRANSOCKS -p tcp -j REDIRECT --to-ports 1081
+    -A TRANSOCKS -p icmp -j REDIRECT --to-ports 1081
+
+    COMMIT
+  path: /etc/ufw/before.rules
+  append: true
+  owner: root:root
+  perissions: '0640'
+- content: !!binary {transocks_binary_content}
+  path: /usr/local/bin/transocks
+  owner: root:root
+  permissions: '0755'
+
+runcmd:
+- systemctl daemon-reload
+- systemctl enable transocks
+- systemctl start transocks
+- ufw enable
+- ufw allow 22
 """
 
 
@@ -141,6 +182,12 @@ def product2image(product: Product) -> RemoteImage:
     )
 
 
+def load_transocks_as_base64_str() -> str:
+    with open("bin/transocks", mode="rb") as f:
+        transocks_binary = f.read()
+    return b64encode(transocks_binary).decode("ascii")
+
+
 def create_config(
     name: str, default_user_name: str, default_user_passwd: str, image_alias: str
 ):
@@ -148,19 +195,10 @@ def create_config(
     return {
         "name": name,
         "config": {
-            "environment.http_proxy": UEC_HTTP_PROXY,
-            "environment.https_proxy": UEC_HTTP_PROXY,
-            "environment.ftp_proxy": UEC_HTTP_PROXY,
-            "environment.HTTP_PROXY": UEC_HTTP_PROXY,
-            "environment.HTTPS_PROXY": UEC_HTTP_PROXY,
-            "environment.FTP_PROXY": UEC_HTTP_PROXY,
-            "environment.no_proxy": UEC_NO_PROXY,
-            "environment.NO_PROXY": UEC_NO_PROXY,
             "user.user-data": CLOUDINIT_USERDATA.format(
                 default_user_name=default_user_name,
                 hashed_default_user_passwd=hashed_default_user_passwd,
-                http_proxy=UEC_HTTP_PROXY,
-                no_proxy=UEC_NO_PROXY,
+                transocks_binary_content=load_transocks_as_base64_str(),
             ),
         },
         "source": {
