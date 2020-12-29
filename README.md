@@ -2,7 +2,7 @@
 
 Dead simple Web UI for managing virtual machines build on top of LXD
 
-## Develop
+## Development
 
 ### Requirement
 
@@ -18,4 +18,8 @@ Dead simple Web UI for managing virtual machines build on top of LXD
 
 ## Deployment
 
-TODO: ...
+Public Docker image: [ghcr.io/ueckoken/kc2](https://github.com/orgs/ueckoken/packages/container/package/kc2)
+
+```
+docker run -p 8000:8000 -v /var/snap/lxd/common/lxd/unix.socket:/var/snap/lxd/common/lxd/unix.socket:ro -it ghcr.io/ueckoken/kc2:latest
+```
