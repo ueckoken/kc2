@@ -86,7 +86,7 @@ def is_ipv4(address):
 
 
 def get_addresses(network) -> list[str]:
-    addresses = []
+    addresses: list[str] = []
     for interface in network.values():
         if is_loopback_interface(interface):
             continue
