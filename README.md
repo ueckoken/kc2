@@ -1,6 +1,6 @@
 # KC2: Koken Compute Cloud
 
-Dead simple Web UI for managing virtual machines build on top of LXD
+Dead simple Web UI for managing virtual machines for UEC private network build on top of LXD
 
 ## Development
 
@@ -8,6 +8,7 @@ Dead simple Web UI for managing virtual machines build on top of LXD
 
 - Python 3.9.x (pyenv recommended)
 - poetry
+- [transocks](https://github.com/cybozu-go/transocks) binary installed at `bin/transocks`
 
 ### Command
 
