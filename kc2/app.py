@@ -93,6 +93,11 @@ runcmd:
 - systemctl start transocks
 - ufw enable
 - ufw allow 22
+- apt update
+- apt install -y avahi-daemon
+- systemctl enable avahi-daemon
+- systemctl start avahi-daemon
+- ufw allow 5353
 """
 
 
