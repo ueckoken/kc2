@@ -1,9 +1,11 @@
+import asyncio
 from base64 import b64encode
 import crypt
 from enum import Enum
 from dataclasses import dataclass
 from itertools import filterfalse
-from typing import Optional
+import re
+from typing import Literal, Optional, Union
 from fastapi import FastAPI, Request, Response, Form, Cookie, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
@@ -113,14 +115,15 @@ class RemoteImage:
     variant: Optional[str]
 
 
+CloudinitStatus = Literal["running", "done"]
+ContainerStatus = Literal["pending", "running", "stopped"]
+
 # read-only information of Container
 @dataclass(frozen=True)
 class ContainerInfo:
     name: str
     addresses: list[str]
-    status: str
-    running: bool
-    stopped: bool
+    status: ContainerStatus
 
 
 def is_loopback_interface(interface):
@@ -149,16 +152,39 @@ def is_stopped(container) -> bool:
     return container.status == "Stopped"
 
 
-def get_container_info(container) -> ContainerInfo:
+async def get_container_cloudinit_status(container) -> Union[CloudinitStatus, None]:
+    loop = asyncio.get_running_loop()
+    try:
+        exit_code, stdout, stderr = await loop.run_in_executor(
+            None, container.execute, ["cloud-init", "status"]
+        )
+    except Exception:
+        return None
+    match = re.match(r"status: (?P<status>\w+)$", stdout)
+    if match is None:
+        return None
+    status: CloudinitStatus = match.group("status")
+    return status
+
+
+async def get_container_status(container) -> ContainerStatus:
+    if is_running(container):
+        cloudinit_status = await get_container_cloudinit_status(container)
+        if cloudinit_status is None:
+            return "running"
+        elif cloudinit_status == "running":
+            return "pending"
+        elif cloudinit_status == "done":
+            return "running"
+    else:
+        return "stopped"
+
+
+async def get_container_info(container) -> ContainerInfo:
+    status = await get_container_status(container)
     state = container.state()
     addresses = get_addresses(state.network) if state.network is not None else []
-    return ContainerInfo(
-        name=container.name,
-        addresses=addresses,
-        status=container.status,
-        running=is_running(container),
-        stopped=is_stopped(container),
-    )
+    return ContainerInfo(name=container.name, addresses=addresses, status=status)
 
 
 def is_default_arch(image: RemoteImage) -> bool:
@@ -227,9 +253,9 @@ def redirect_to_create_container():
 
 
 @app.get("/instances", response_class=HTMLResponse)
-def list_containers(request: Request):
+async def list_containers(request: Request):
     containers = client.containers.all()
-    container_info_list = list(map(get_container_info, containers))
+    container_info_list = await asyncio.gather(*map(get_container_info, containers))
     return templates.TemplateResponse(
         "list.html", {"request": request, "containers": container_info_list}
     )

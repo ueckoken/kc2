@@ -20,10 +20,12 @@
 			{% for container in containers %}
 			<tr>
 				<td>
-					{% if container.running %}
+					{% if container.status == "running" %}
 					<span class="badge rounded-pill bg-success">
-					{% elif container.stopped %}
+					{% elif container.status == "stopped" %}
 					<span class="badge rounded-pill bg-secondary">
+					{% elif container.status == "pending" %}
+					<span class="badge rounded-pill bg-warning">
 					{% else %}
 					<span class="badge rounded-pill">
 					{% endif %}
@@ -43,7 +45,7 @@
 						<button class="btn btn-sm dropdown-toggle align-text-top" data-bs-boundary="viewport" data-bs-toggle="dropdown">操作</button>
 						<div class="dropdown-menu dropdown-menu-end" style="margin: 0px;">
 							<form action="/instances/{{ container.name }}/start" method="POST" style="display: contents;">
-								{% if container.running %}
+								{% if container.status == "running" or container.status == "pending" %}
 								<button class="dropdown-item" disabled>
 								{% else %}
 								<button class="dropdown-item">
@@ -52,7 +54,7 @@
 								</button>
 							</form>
 							<form action="/instances/{{ container.name }}/stop" method="POST" style="display: contents;">
-								{% if container.stopped %}
+								{% if container.status == "stopped" %}
 								<button class="dropdown-item" disabled>
 								{% else %}
 								<button class="dropdown-item">
@@ -61,7 +63,7 @@
 								</button>
 							</form>
 							<form action="/instances/{{ container.name }}/restart" method="POST" style="display: contents;">
-								{% if container.stopped %}
+								{% if container.status == "stopped" %}
 								<button class="dropdown-item" disabled>
 								{% else %}
 								<button class="dropdown-item">
@@ -70,7 +72,7 @@
 								</button>
 							</form>
 							<form action="/instances/{{ container.name }}/destroy" method="POST" style="display: contents;">
-								{% if container.running %}
+								{% if container.status == "running" or container.status == "pending" %}
 								<button class="dropdown-item btn-outline-danger" disabled>
 								{% else %}
 								<button class="dropdown-item btn-outline-danger">
