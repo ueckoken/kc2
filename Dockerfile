@@ -1,6 +1,10 @@
 FROM golang:1.15 as install-transocks
 
-RUN go get -u github.com/cybozu-go/transocks/...
+ENV GO111MODULE on
+
+RUN git clone https://github.com/cybozu-go/transocks -b v1.1.1 $GOPATH/src/github.com/cybouzu-go/transocks \
+ && cd $GOPATH/src/github.com/cybouzu-go/transocks \
+ && go install ./...
 
 FROM python:3.9
 
