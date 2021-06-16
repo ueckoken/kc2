@@ -13,9 +13,7 @@
 				</label>
 				<div class="col">
 					<select name="image_alias" class="form-select">
-						{% for image in images %}
-						<option value="{{ image.aliases[0] }}">{{ image.os }} {{ image.release_title }}</option>
-						{% endfor %}
+						<option disabled selected>Loading...</option>
 					</select>
 				</div>
 			</div>
@@ -49,4 +47,20 @@
 		</form>
 	</div>
 </div>
+<script async>
+	(async () => {
+		const response = await fetch("/images")
+		const images = await response.json()
+		const $select = document.querySelector("select[name=image_alias]")
+		const df = new DocumentFragment()
+		for (const image of images) {
+			const $option = new Option(
+				`${image.os} ${image.release_title}`,
+				image.aliases[0]
+			)
+			df.append($option)
+		}
+		$select.replaceChildren(df)
+	})()
+</script>
 {% endblock %}
