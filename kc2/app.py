@@ -249,7 +249,7 @@ def validation_exception_handler(request, exc):
 
 @app.get("/")
 def redirect_to_create_container():
-    return RedirectResponse("/instances/new")
+    return RedirectResponse("/instances")
 
 
 @app.get("/instances", response_class=HTMLResponse)
