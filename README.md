@@ -2,6 +2,12 @@
 
 Dead simple Web UI for managing virtual machines for UEC private network build on top of LXD
 
+## Feature
+
+- Super easy to create virtual machine
+- Transparent [UEC SOCKS proxy](https://www.cc.uec.ac.jp/ug/ja/network/socks/) out of the box via [transocks](https://github.com/cybozu-go/transocks)
+- Resolve `<server-name>.local` to local IP address via preinstalled `avahi-daemon`
+
 ## Development
 
 ### Requirement
