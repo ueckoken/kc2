@@ -116,14 +116,20 @@ class RemoteImage:
 
 
 CloudinitStatus = Literal["running", "done"]
-ContainerStatus = Literal["pending", "running", "stopped"]
+
+
+@dataclass(frozen=True)
+class Address:
+    address: str
+    netmask: str
+
 
 # read-only information of Container
 @dataclass(frozen=True)
 class ContainerInfo:
     name: str
-    addresses: list[str]
-    status: ContainerStatus
+    status: str
+    addresses: list[Address]
 
 
 def is_loopback_interface(interface):
@@ -134,14 +140,18 @@ def is_ipv4(address):
     return address["family"] == "inet"
 
 
-def get_addresses(network) -> list[str]:
-    addresses: list[str] = []
+def get_addresses(network) -> list[Address]:
+    ipv4_addrs: list = []
     for interface in network.values():
         if is_loopback_interface(interface):
             continue
-        ipv4_addr = filter(is_ipv4, interface["addresses"])
-        addresses += ipv4_addr
-    return addresses
+        ipv4_addrs += filter(is_ipv4, interface["addresses"])
+
+    ipv4_addresses = map(
+        lambda addr: Address(address=addr["address"], netmask=addr["netmask"]),
+        ipv4_addrs,
+    )
+    return list(ipv4_addresses)
 
 
 def is_running(container) -> bool:
@@ -167,24 +177,18 @@ async def get_container_cloudinit_status(container) -> Union[CloudinitStatus, No
     return status
 
 
-async def get_container_status(container) -> ContainerStatus:
-    if is_running(container):
-        cloudinit_status = await get_container_cloudinit_status(container)
-        if cloudinit_status is None:
-            return "running"
-        elif cloudinit_status == "running":
-            return "pending"
-        elif cloudinit_status == "done":
-            return "running"
-    else:
-        return "stopped"
-
-
-async def get_container_info(container) -> ContainerInfo:
-    status = await get_container_status(container)
+def get_container_addresses(container) -> list[Address]:
     state = container.state()
     addresses = get_addresses(state.network) if state.network is not None else []
-    return ContainerInfo(name=container.name, addresses=addresses, status=status)
+    return addresses
+
+
+def get_container_info(container) -> ContainerInfo:
+    addresses = get_container_addresses(container)
+    container_info = ContainerInfo(
+        name=container.name, status=container.status, addresses=addresses
+    )
+    return container_info
 
 
 def is_default_arch(image: RemoteImage) -> bool:
@@ -255,9 +259,9 @@ def redirect_to_create_container():
 @app.get("/instances", response_class=HTMLResponse)
 async def list_containers(request: Request):
     containers = client.containers.all()
-    container_info_list = await asyncio.gather(*map(get_container_info, containers))
+    container_infos = list(map(get_container_info, containers))
     return templates.TemplateResponse(
-        "list.html", {"request": request, "containers": container_info_list}
+        "list.html", {"request": request, "containers": container_infos}
     )
 
 
@@ -280,12 +284,14 @@ def create_a_container(
 
 @app.get("/instances/new", response_class=HTMLResponse)
 def new_container(request: Request):
-    raw_images = list_remote_images(DEFAULT_IMAGE_SERVER)
-    images = map(product2image, raw_images)
-    available_images = list(filter(is_available_image, images))
-    return templates.TemplateResponse(
-        "new.html", {"request": request, "images": available_images}
-    )
+    return templates.TemplateResponse("new.html", {"request": request})
+
+
+@app.get("/instances/{name}/status")
+async def show_status(name: str):
+    container = client.containers.get(name)
+    status = await get_container_cloudinit_status(container)
+    return status
 
 
 @app.post("/instances/{name}/start")
@@ -330,3 +336,11 @@ def destroy_container(name: str):
         return response
     container.delete(wait=True)
     return response
+
+
+@app.get("/images")
+def list_images():
+    raw_images = list_remote_images(DEFAULT_IMAGE_SERVER)
+    images = map(product2image, raw_images)
+    available_images = list(filter(is_available_image, images))
+    return available_images

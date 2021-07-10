@@ -13,6 +13,7 @@
 		<thead>
 			<th>状態</th>
 			<th>インスタンス名</th>
+			<th>ステータスチェック</th>
 			<th>IPv4アドレス</th>
 			<th></th>
 		</thead>
@@ -20,12 +21,10 @@
 			{% for container in containers %}
 			<tr>
 				<td>
-					{% if container.status == "running" %}
+					{% if container.status == "Running" %}
 					<span class="badge rounded-pill bg-success">
-					{% elif container.status == "stopped" %}
+					{% elif container.status == "Stopped" %}
 					<span class="badge rounded-pill bg-secondary">
-					{% elif container.status == "pending" %}
-					<span class="badge rounded-pill bg-warning">
 					{% else %}
 					<span class="badge rounded-pill">
 					{% endif %}
@@ -33,6 +32,28 @@
 					</span>
 				</td>
 				<td>{{ container.name }}</td>
+				<td>
+					<!-- Download SVG icon from http://tabler-icons.io/i/alert-circle -->
+					<svg xmlns="http://www.w3.org/2000/svg" class="icon d-none" data-id="alert-circle" width="24" height="24" viewBox="0 0 24 24" stroke-width="2"
+						stroke="var(--tblr-yellow)" fill="none" stroke-linecap="round" stroke-linejoin="round">
+						<path stroke="none" d="M0 0h24v24H0z" fill="none" />
+						<circle cx="12" cy="12" r="9" />
+						<line x1="12" y1="8" x2="12" y2="12" />
+						<line x1="12" y1="16" x2="12.01" y2="16" />
+					</svg>
+					<!-- Download SVG icon from http://tabler-icons.io/i/circle-check -->
+					<svg xmlns="http://www.w3.org/2000/svg" class="icon d-none" data-id="circle-check" width="24" height="24" viewBox="0 0 24 24" stroke-width="2"
+						stroke="var(--tblr-green)" fill="none" stroke-linecap="round" stroke-linejoin="round">
+						<path stroke="none" d="M0 0h24v24H0z" fill="none" />
+						<circle cx="12" cy="12" r="9" />
+						<path d="M9 12l2 2l4 -4" />
+					</svg>
+					<span data-id="text">
+					{% if container.status != "Stopped" %}
+						Loading...
+					{% endif %}
+					</span>
+				</td>
 				<td>
 					<ul class="list-group mb-0" style="list-style-type: none;">
 						{% for address in container.addresses %}
@@ -45,7 +66,7 @@
 						<button class="btn btn-sm dropdown-toggle align-text-top" data-bs-boundary="viewport" data-bs-toggle="dropdown">操作</button>
 						<div class="dropdown-menu dropdown-menu-end" style="margin: 0px;">
 							<form action="/instances/{{ container.name }}/start" method="POST" style="display: contents;">
-								{% if container.status == "running" or container.status == "pending" %}
+								{% if container.status == "Running" %}
 								<button class="dropdown-item" disabled>
 								{% else %}
 								<button class="dropdown-item">
@@ -54,7 +75,7 @@
 								</button>
 							</form>
 							<form action="/instances/{{ container.name }}/stop" method="POST" style="display: contents;">
-								{% if container.status == "stopped" %}
+								{% if container.status == "Stopped" %}
 								<button class="dropdown-item" disabled>
 								{% else %}
 								<button class="dropdown-item">
@@ -63,7 +84,7 @@
 								</button>
 							</form>
 							<form action="/instances/{{ container.name }}/restart" method="POST" style="display: contents;">
-								{% if container.status == "stopped" %}
+								{% if container.status == "Stopped" %}
 								<button class="dropdown-item" disabled>
 								{% else %}
 								<button class="dropdown-item">
@@ -72,7 +93,7 @@
 								</button>
 							</form>
 							<form action="/instances/{{ container.name }}/destroy" method="POST" style="display: contents;">
-								{% if container.status == "running" or container.status == "pending" %}
+								{% if container.status == "Running" %}
 								<button class="dropdown-item btn-outline-danger" disabled>
 								{% else %}
 								<button class="dropdown-item btn-outline-danger">
@@ -88,5 +109,36 @@
 		</tbody>
 	</table>
 </div>
+<script async>
+async function loadStatus($row) {
+	const containerName = $row.cells[1].textContent
+	const response = await fetch(`/instances/${containerName}/status`)
+	const status = await response.json()
 
+	const $statusCheckCell = $row.cells[2]
+	const $checkIcon = $statusCheckCell.querySelector("[data-id=circle-check]")
+	const $warningIcon = $statusCheckCell.querySelector("[data-id=alert-circle]")
+	const $text = $statusCheckCell.querySelector("[data-id=text]")
+	if (status === "done") {
+		$checkIcon.classList.remove("d-none")
+		$text.textContent = "利用可能"
+	} else if (status === "running") {
+		$warningIcon.classList.remove("d-none")
+		$text.textContent = "初期化中..."
+	} else if (status === null) {
+		$text.textContent = ""
+	} else {
+		$text.textContent = "unknown"
+	}
+}
+const $table = document.querySelector("table")
+const $bodyRows = Array.from($table.tBodies[0].rows)
+for (const $row of $bodyRows) {
+	if ($row.cells[0].textContent.trim() === "stopped") {
+		continue
+	}
+	// do not await for parallel loading
+	loadStatus($row)
+}
+</script>
 {% endblock %}
