@@ -12,7 +12,7 @@ from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pylxd import Client  # type: ignore
-from .simplestreams import Product, list_remote_images
+from simplesimplestreams import Product, SimpleStreamsClient
 
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
@@ -25,6 +25,8 @@ LINUXCONTAINER_IMAGE_SERVER = "https://images.linuxcontainers.org"
 
 UBUNTU_IMAGE_SERVER = "https://cloud-images.ubuntu.com/releases"
 DEFAULT_IMAGE_SERVER = UBUNTU_IMAGE_SERVER
+
+ssclient = SimpleStreamsClient(url=DEFAULT_IMAGE_SERVER)
 
 DEFAULT_ARCH = "amd64"
 
@@ -340,7 +342,7 @@ def destroy_container(name: str):
 
 @app.get("/images")
 def list_images():
-    raw_images = list_remote_images(DEFAULT_IMAGE_SERVER)
+    raw_images = ssclient.list_images()
     images = map(product2image, raw_images)
     available_images = list(filter(is_available_image, images))
     return available_images
