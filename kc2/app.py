@@ -1,5 +1,4 @@
 import asyncio
-from base64 import b64encode
 import crypt
 from enum import Enum
 from dataclasses import dataclass
@@ -38,6 +37,10 @@ system_info:
     passwd: {hashed_default_user_passwd}
     lock_passwd: false
 ssh_pwauth: true
+
+bootcmd:
+- http_proxy=http://proxy.uec.ac.jp:8080 https_proxy=http://proxy.uec.ac.jp:8080 wget -l -P /usr/local/bin -O /usr/local/bin/transocks https://github.com/otariidae/transocks/releases/download/v1.1.1%2B2cf9915/transocks_x86_64
+- chmod +x /usr/local/bin/transocks
 
 write_files:
 - content: |
@@ -86,10 +89,6 @@ write_files:
   append: true
   owner: root:root
   perissions: '0640'
-- content: !!binary {transocks_binary_content}
-  path: /usr/local/bin/transocks
-  owner: root:root
-  permissions: '0755'
 
 runcmd:
 - systemctl daemon-reload
@@ -219,12 +218,6 @@ def product2image(product: Product) -> RemoteImage:
     )
 
 
-def load_transocks_as_base64_str() -> str:
-    with open("bin/transocks", mode="rb") as f:
-        transocks_binary = f.read()
-    return b64encode(transocks_binary).decode("ascii")
-
-
 def create_config(
     name: str, default_user_name: str, default_user_passwd: str, image_alias: str
 ):
@@ -235,7 +228,6 @@ def create_config(
             "user.user-data": CLOUDINIT_USERDATA.format(
                 default_user_name=default_user_name,
                 hashed_default_user_passwd=hashed_default_user_passwd,
-                transocks_binary_content=load_transocks_as_base64_str(),
             ),
         },
         "source": {

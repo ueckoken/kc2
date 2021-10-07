@@ -14,7 +14,6 @@ Dead simple Web UI for managing virtual machines for UEC private network build o
 
 - Python 3.9.x (pyenv recommended)
 - poetry
-- [transocks](https://github.com/cybozu-go/transocks) binary installed at `bin/transocks`
 
 ### Command
 
