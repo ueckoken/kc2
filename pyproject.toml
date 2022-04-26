@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "kc2"
-version = "0.5.0"
+version = "0.5.1"
 description = "Koken Compute Cloud"
 authors = ["otariidae <otariidae@users.noreply.github.com>"]
 
