@@ -39,7 +39,7 @@ system_info:
 ssh_pwauth: true
 
 bootcmd:
-- http_proxy=http://proxy.uec.ac.jp:8080 https_proxy=http://proxy.uec.ac.jp:8080 wget -l -P /usr/local/bin -O /usr/local/bin/transocks https://github.com/otariidae/transocks/releases/download/v1.1.1%2B2cf9915/transocks_x86_64
+- http_proxy=http://proxy.uec.ac.jp:8080 https_proxy=http://proxy.uec.ac.jp:8080 wget -l -P /usr/local/bin -O /usr/local/bin/transocks https://github.com/otariidae/transocks/releases/download/v1.1.1+2cf9915/transocks_x86_64
 - chmod +x /usr/local/bin/transocks
 
 write_files:
