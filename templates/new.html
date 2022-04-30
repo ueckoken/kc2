@@ -18,6 +18,38 @@
 				</div>
 			</div>
 			<div class="form-group row mb-3">
+				<label for="instance_type" class="form-label col-3 col-form-label">
+					種別
+				</label>
+				<div class="col">
+					<select name="instance_type" class="form-select">
+						<option selected value="container">コンテナ（推奨）</option>
+						<option value="virtual-machine">仮想マシン（上級者向け）</option>
+					</select>
+				</div>
+			</div>
+			<div class="form-group row mb-3">
+				<label for="type" class="form-label col-3 col-form-label">
+					vCPU
+					<small>※仮想マシンのみ</small>
+				</label>
+				<div class="col">
+					<input type="number" name="vcpu" value="1" min="1" max="{{ cpu_count }}" disabled class="form-control">
+				</div>
+			</div>
+			<div class="form-group row mb-3">
+				<label for="type" class="form-label col-3 col-form-label">
+					メモリ
+					<small>※仮想マシンのみ</small>
+				</label>
+				<div class="col">
+					<div class="input-group">
+						<input type="number" name="memory" value="1024" min="1" max="{{ available_memory }}" disabled class="form-control">
+						<span class="input-group-text">MB</span>
+					</div>
+				</div>
+			</div>
+			<div class="form-group row mb-3">
 				<label for="name" class="form-label col-3 col-form-label">
 					インスタンス名
 				</label>
@@ -49,9 +81,23 @@
 </div>
 <script async>
 	(async () => {
+		const $instanceTypeSelect = document.querySelector("select[name=instance_type]")
+		const $vcpuInput = document.querySelector("input[name=vcpu]")
+		const $memoryInput = document.querySelector("input[name=memory]")
+		$instanceTypeSelect.addEventListener("change", (e) => {
+			const instanceType = e.target.value
+			if (instanceType === "virtual-machine") {
+				$vcpuInput.disabled = false
+				$memoryInput.disabled = false
+			} else if (instanceType === "container") {
+				$vcpuInput.disabled = true
+				$memoryInput.disabled = true
+			}
+		})
+
 		const response = await fetch("/images")
 		const images = await response.json()
-		const $select = document.querySelector("select[name=image_alias]")
+		const $imagesSelect = document.querySelector("select[name=image_alias]")
 		const df = new DocumentFragment()
 		for (const image of images) {
 			const $option = new Option(
@@ -60,7 +106,8 @@
 			)
 			df.append($option)
 		}
-		$select.replaceChildren(df)
+		$imagesSelect.replaceChildren(df)
+
 	})()
 </script>
 {% endblock %}
