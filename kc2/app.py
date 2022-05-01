@@ -291,8 +291,8 @@ async def list_instances(request: Request):
 def create_a_instance(
     image_alias: str = Form(...),
     instance_type: InstanceType = Form(...),
-    vcpu: Optional[int] = Form(...),
-    memory: Optional[int] = Form(...),
+    vcpu: Optional[int] = Form(None),
+    memory: Optional[int] = Form(None),
     name: str = Form(...),
     default_user_name: str = Form(...),
     default_user_passwd: str = Form(...),
