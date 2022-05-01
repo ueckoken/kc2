@@ -3,13 +3,16 @@ import crypt
 from enum import Enum
 from dataclasses import dataclass
 from itertools import filterfalse
+import math
+import os
 import re
-from typing import Literal, Optional, Union
+from typing import Literal, Optional, TypedDict, Union
 from fastapi import FastAPI, Request, Response, Form, Cookie, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+import psutil
 from pylxd import Client  # type: ignore
 from simplesimplestreams import Product, SimpleStreamsClient
 
@@ -103,6 +106,15 @@ runcmd:
 - ufw allow 5353
 """
 
+InstanceType = Literal["container", "virtual-machine"]
+
+
+# minimum rough type definition
+class InstancePost(TypedDict):
+    name: str
+    source: dict[str, str]
+    config: dict[str, str]
+
 
 # type-friendly, immutable, and simpler version of Product
 @dataclass(frozen=True)
@@ -125,12 +137,13 @@ class Address:
     netmask: str
 
 
-# read-only information of Container
+# read-only information of Instance
 @dataclass(frozen=True)
-class ContainerInfo:
+class InstanceInfo:
     name: str
     status: str
     addresses: list[Address]
+    type: Literal["container", "virtual-machine"]
 
 
 def is_loopback_interface(interface):
@@ -155,19 +168,19 @@ def get_addresses(network) -> list[Address]:
     return list(ipv4_addresses)
 
 
-def is_running(container) -> bool:
-    return container.status == "Running"
+def is_running(instance) -> bool:
+    return instance.status == "Running"
 
 
-def is_stopped(container) -> bool:
-    return container.status == "Stopped"
+def is_stopped(instance) -> bool:
+    return instance.status == "Stopped"
 
 
-async def get_container_cloudinit_status(container) -> Union[CloudinitStatus, None]:
+async def get_instance_cloudinit_status(instance) -> Union[CloudinitStatus, None]:
     loop = asyncio.get_running_loop()
     try:
         exit_code, stdout, stderr = await loop.run_in_executor(
-            None, container.execute, ["cloud-init", "status"]
+            None, instance.execute, ["cloud-init", "status"]
         )
     except Exception:
         return None
@@ -178,18 +191,21 @@ async def get_container_cloudinit_status(container) -> Union[CloudinitStatus, No
     return status
 
 
-def get_container_addresses(container) -> list[Address]:
-    state = container.state()
+def get_instance_addresses(instance) -> list[Address]:
+    state = instance.state()
     addresses = get_addresses(state.network) if state.network is not None else []
     return addresses
 
 
-def get_container_info(container) -> ContainerInfo:
-    addresses = get_container_addresses(container)
-    container_info = ContainerInfo(
-        name=container.name, status=container.status, addresses=addresses
+def get_instance_info(instance) -> InstanceInfo:
+    addresses = get_instance_addresses(instance)
+    instance_info = InstanceInfo(
+        name=instance.name,
+        status=instance.status,
+        addresses=addresses,
+        type=instance.type,
     )
-    return container_info
+    return instance_info
 
 
 def is_default_arch(image: RemoteImage) -> bool:
@@ -219,10 +235,16 @@ def product2image(product: Product) -> RemoteImage:
 
 
 def create_config(
-    name: str, default_user_name: str, default_user_passwd: str, image_alias: str
+    name: str,
+    default_user_name: str,
+    default_user_passwd: str,
+    image_alias: str,
+    instance_type: InstanceType,
+    vcpu: Optional[int],
+    memory: Optional[int],
 ):
     hashed_default_user_passwd = crypt.crypt(default_user_passwd)
-    return {
+    config: InstancePost = {
         "name": name,
         "config": {
             "user.user-data": CLOUDINIT_USERDATA.format(
@@ -238,6 +260,12 @@ def create_config(
             "alias": image_alias,
         },
     }
+    if instance_type == "virtual-machine":
+        if vcpu is not None:
+            config["config"]["limits.cpu"] = str(vcpu)
+        if memory is not None:
+            config["config"]["limits.memory"] = str(memory) + "MB"
+    return config
 
 
 @app.exception_handler(RequestValidationError)
@@ -246,22 +274,25 @@ def validation_exception_handler(request, exc):
 
 
 @app.get("/")
-def redirect_to_create_container():
+def redirect_to_create_instance():
     return RedirectResponse("/instances")
 
 
 @app.get("/instances", response_class=HTMLResponse)
-async def list_containers(request: Request):
-    containers = client.containers.all()
-    container_infos = list(map(get_container_info, containers))
+async def list_instances(request: Request):
+    instances = client.instances.all()
+    instance_infos = list(map(get_instance_info, instances))
     return templates.TemplateResponse(
-        "list.html", {"request": request, "containers": container_infos}
+        "list.html", {"request": request, "instances": instance_infos}
     )
 
 
 @app.post("/instances")
-def create_a_container(
+def create_a_instance(
     image_alias: str = Form(...),
+    instance_type: InstanceType = Form(...),
+    vcpu: Optional[int] = Form(...),
+    memory: Optional[int] = Form(...),
     name: str = Form(...),
     default_user_name: str = Form(...),
     default_user_passwd: str = Form(...),
@@ -271,64 +302,83 @@ def create_a_container(
         default_user_name=default_user_name,
         default_user_passwd=default_user_passwd,
         image_alias=image_alias,
+        instance_type=instance_type,
+        vcpu=vcpu,
+        memory=memory,
     )
-    container = client.containers.create(config, wait=True)
+    model = (
+        client.virtual_machines
+        if instance_type == "virtual-machine"
+        else client.containers
+    )
+    instance = model.create(config, wait=True)
     return RedirectResponse("/instances", status_code=303)
 
 
 @app.get("/instances/new", response_class=HTMLResponse)
-def new_container(request: Request):
-    return templates.TemplateResponse("new.html", {"request": request})
+def new_instance(request: Request):
+    available_cpu_core = os.cpu_count()
+    mem = psutil.virtual_memory()
+    available_mem_megabytes = math.ceil(mem.available / 1024 / 1024)
+    print(available_mem_megabytes)
+    return templates.TemplateResponse(
+        "new.html",
+        {
+            "request": request,
+            "cpu_count": available_cpu_core,
+            "available_memory": available_mem_megabytes,
+        },
+    )
 
 
 @app.get("/instances/{name}/status")
 async def show_status(name: str):
-    container = client.containers.get(name)
-    status = await get_container_cloudinit_status(container)
+    instance = client.instances.get(name)
+    status = await get_instance_cloudinit_status(instance)
     return status
 
 
 @app.post("/instances/{name}/start")
-def start_container(name: str):
-    container = client.containers.get(name)
+def start_instance(name: str):
+    instance = client.instances.get(name)
     response = RedirectResponse("/instances", status_code=303)
-    # cannot start a running container
-    if is_running(container):
+    # cannot start a running instance
+    if is_running(instance):
         return response
-    container.start(wait=True)
+    instance.start(wait=True)
     return response
 
 
 @app.post("/instances/{name}/stop")
-def stop_container(name: str):
-    container = client.containers.get(name)
+def stop_instance(name: str):
+    instance = client.instances.get(name)
     response = RedirectResponse("/instances", status_code=303)
-    # cannot stop a stopped container
-    if is_stopped(container):
+    # cannot stop a stopped instance
+    if is_stopped(instance):
         return response
-    container.stop(wait=True)
+    instance.stop(wait=True)
     return response
 
 
 @app.post("/instances/{name}/restart")
-def restart_container(name: str):
-    container = client.containers.get(name)
+def restart_instance(name: str):
+    instance = client.instances.get(name)
     response = RedirectResponse("/instances", status_code=303)
-    # cannot restart a stopped container
-    if is_stopped(container):
+    # cannot restart a stopped instance
+    if is_stopped(instance):
         return response
-    container.restart(wait=True)
+    instance.restart(wait=True)
     return response
 
 
 @app.post("/instances/{name}/destroy")
-def destroy_container(name: str):
-    container = client.containers.get(name)
+def destroy_instance(name: str):
+    instance = client.instances.get(name)
     response = RedirectResponse("/instances", status_code=303)
-    # cannot delete a running container
-    if is_running(container):
+    # cannot delete a running instance
+    if is_running(instance):
         return response
-    container.delete(wait=True)
+    instance.delete(wait=True)
     return response
 
 

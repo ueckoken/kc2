@@ -3,7 +3,7 @@
 {% block content %}
 <div class="card">
 	<div class="card-header">
-		<h1 class="card-title">インスタンス ({{ containers | length }})</h1>
+		<h1 class="card-title">インスタンス ({{ instances | length }})</h1>
 	</div>
 	<div class="card-body text-end">
 		<a href="/instances" class="btn">↻</a>
@@ -15,23 +15,24 @@
 			<th>インスタンス名</th>
 			<th>ステータスチェック</th>
 			<th>IPv4アドレス</th>
+			<th>種別</th>
 			<th></th>
 		</thead>
 		<tbody>
-			{% for container in containers %}
+			{% for instance in instances %}
 			<tr>
 				<td>
-					{% if container.status == "Running" %}
+					{% if instance.status == "Running" %}
 					<span class="badge rounded-pill bg-success">
-					{% elif container.status == "Stopped" %}
+					{% elif instance.status == "Stopped" %}
 					<span class="badge rounded-pill bg-secondary">
 					{% else %}
 					<span class="badge rounded-pill">
 					{% endif %}
-						{{ container.status | lower }}
+						{{ instance.status | lower }}
 					</span>
 				</td>
-				<td>{{ container.name }}</td>
+				<td>{{ instance.name }}</td>
 				<td>
 					<!-- Download SVG icon from http://tabler-icons.io/i/alert-circle -->
 					<svg xmlns="http://www.w3.org/2000/svg" class="icon d-none" data-id="alert-circle" width="24" height="24" viewBox="0 0 24 24" stroke-width="2"
@@ -49,24 +50,33 @@
 						<path d="M9 12l2 2l4 -4" />
 					</svg>
 					<span data-id="text">
-					{% if container.status != "Stopped" %}
+					{% if instance.status != "Stopped" %}
 						Loading...
 					{% endif %}
 					</span>
 				</td>
 				<td>
 					<ul class="list-group mb-0" style="list-style-type: none;">
-						{% for address in container.addresses %}
+						{% for address in instance.addresses %}
 						<li>{{ address.address }}/{{ address.netmask }}</li>
 						{% endfor %}
 					</ul>
+				</td>
+				<td>
+					{% if instance.type == "container" %}
+						コンテナ
+					{% elif instance.type == "virtual-machine" %}
+						仮想マシン
+					{% else %}
+						{{ instance.type }}
+					{% endif %}
 				</td>
 				<td class="text-right">
 					<span class="dropdown">
 						<button class="btn btn-sm dropdown-toggle align-text-top" data-bs-boundary="viewport" data-bs-toggle="dropdown">操作</button>
 						<div class="dropdown-menu dropdown-menu-end" style="margin: 0px;">
-							<form action="/instances/{{ container.name }}/start" method="POST" style="display: contents;">
-								{% if container.status == "Running" %}
+							<form action="/instances/{{ instance.name }}/start" method="POST" style="display: contents;">
+								{% if instance.status == "Running" %}
 								<button class="dropdown-item" disabled>
 								{% else %}
 								<button class="dropdown-item">
@@ -74,8 +84,8 @@
 									開始
 								</button>
 							</form>
-							<form action="/instances/{{ container.name }}/stop" method="POST" style="display: contents;">
-								{% if container.status == "Stopped" %}
+							<form action="/instances/{{ instance.name }}/stop" method="POST" style="display: contents;">
+								{% if instance.status == "Stopped" %}
 								<button class="dropdown-item" disabled>
 								{% else %}
 								<button class="dropdown-item">
@@ -83,8 +93,8 @@
 									停止
 								</button>
 							</form>
-							<form action="/instances/{{ container.name }}/restart" method="POST" style="display: contents;">
-								{% if container.status == "Stopped" %}
+							<form action="/instances/{{ instance.name }}/restart" method="POST" style="display: contents;">
+								{% if instance.status == "Stopped" %}
 								<button class="dropdown-item" disabled>
 								{% else %}
 								<button class="dropdown-item">
@@ -92,8 +102,8 @@
 									再起動
 								</button>
 							</form>
-							<form action="/instances/{{ container.name }}/destroy" method="POST" style="display: contents;">
-								{% if container.status == "Running" %}
+							<form action="/instances/{{ instance.name }}/destroy" method="POST" style="display: contents;">
+								{% if instance.status == "Running" %}
 								<button class="dropdown-item btn-outline-danger" disabled>
 								{% else %}
 								<button class="dropdown-item btn-outline-danger">
@@ -111,8 +121,8 @@
 </div>
 <script async>
 async function loadStatus($row) {
-	const containerName = $row.cells[1].textContent
-	const response = await fetch(`/instances/${containerName}/status`)
+	const instanceName = $row.cells[1].textContent
+	const response = await fetch(`/instances/${instanceName}/status`)
 	const status = await response.json()
 
 	const $statusCheckCell = $row.cells[2]
