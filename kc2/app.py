@@ -91,7 +91,7 @@ write_files:
   path: /etc/ufw/before.rules
   append: true
   owner: root:root
-  perissions: '0640'
+  permissions: '0640'
 
 runcmd:
 - systemctl daemon-reload
