@@ -38,7 +38,7 @@ LXC_SUPPORTED_IMAGE_PREFIX = ["debian/buster", "archlinux"]
 DEFAULT_ARCH = "amd64"
 
 UEC_PROXY_URL = "http://proxy.uec.ac.jp:8080"
-UEC_NOPROXY = "130.153.0.0/16"
+UEC_NOPROXY = "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,130.153.0.0/16,192.50.30.0/23"
 TRANSOCKS_SERVICE = """
 [Unit]
 Description=transocks: Transparent SOCKS5 proxy
