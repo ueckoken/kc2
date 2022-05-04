@@ -1,113 +1,236 @@
 import asyncio
 import crypt
-from enum import Enum
 from dataclasses import dataclass
-from itertools import filterfalse
 import math
 import os
 import re
 from typing import Literal, Optional, TypedDict, Union
-from fastapi import FastAPI, Request, Response, Form, Cookie, status
+from typing_extensions import TypeGuard
+from fastapi import FastAPI, Response, Request, Form
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
-from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 import psutil
+from .cloud_init import UserData
 from pylxd import Client  # type: ignore
 from simplesimplestreams import Product, SimpleStreamsClient
+import yaml
 
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
 
 client = Client()
 
-# linuxcontainer.org image server is defined but not supported
-# some images on this server does not contain OpenSSH Server by default
 LINUXCONTAINER_IMAGE_SERVER = "https://images.linuxcontainers.org"
-
 UBUNTU_IMAGE_SERVER = "https://cloud-images.ubuntu.com/releases"
-DEFAULT_IMAGE_SERVER = UBUNTU_IMAGE_SERVER
 
-ssclient = SimpleStreamsClient(url=DEFAULT_IMAGE_SERVER)
+ubuntuSsclient = SimpleStreamsClient(url=UBUNTU_IMAGE_SERVER)
+lxcSsclient = SimpleStreamsClient(url=LINUXCONTAINER_IMAGE_SERVER)
+
+RemoteEnum = Literal["ubuntu", "lxc"]
+remote_enum_map: dict[RemoteEnum, SimpleStreamsClient] = {
+    "ubuntu": ubuntuSsclient,
+    "lxc": lxcSsclient,
+}
+
+LXC_SUPPORTED_IMAGE_PREFIX = ["debian/buster", "archlinux"]
 
 DEFAULT_ARCH = "amd64"
 
-CLOUDINIT_USERDATA = """
-#cloud-config
-system_info:
-  default_user:
-    name: {default_user_name}
-    passwd: {hashed_default_user_passwd}
-    lock_passwd: false
-ssh_pwauth: true
+UEC_PROXY_URL = "http://proxy.uec.ac.jp:8080"
+UEC_NOPROXY = "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,130.153.0.0/16,192.50.30.0/23"
+TRANSOCKS_SERVICE = """
+[Unit]
+Description=transocks: Transparent SOCKS5 proxy
+Documentation=https://github.com/cybozu-go/transocks
+After=network.target
 
-bootcmd:
-- http_proxy=http://proxy.uec.ac.jp:8080 https_proxy=http://proxy.uec.ac.jp:8080 wget -l -P /usr/local/bin -O /usr/local/bin/transocks https://github.com/otariidae/transocks/releases/download/v1.1.1+2cf9915/transocks_x86_64
-- chmod +x /usr/local/bin/transocks
+[Service]
+ExecStart=/usr/local/bin/transocks
 
-write_files:
-- content: |
-    proxy_url = "socks5://socks.cc.uec.ac.jp:1080"
-  path: /etc/transocks.toml
-  owner: root:root
-  permissions: '0644'
-- content: |
-    [Unit]
-    Description=transocks: Transparent SOCKS5 proxy
-    Documentation=https://github.com/cybozu-go/transocks
-    After=network.target
+[Install]
+WantedBy=multi-user.target
+"""
+TRANSOCKS_IPTABLES_RULE = """
+*nat
+-F
 
-    [Service]
-    ExecStart=/usr/local/bin/transocks
+:PREROUTING ACCEPT [0:0]
+:INPUT ACCEPT [0:0]
+:OUTPUT ACCEPT [0:0]
+:POSTROUTING ACCEPT [0:0]
+:TRANSOCKS - [0:0]
+-A OUTPUT -j TRANSOCKS
+-A TRANSOCKS -d 0.0.0.0/8 -j RETURN
+-A TRANSOCKS -d 10.0.0.0/8 -j RETURN
+-A TRANSOCKS -d 127.0.0.0/8 -j RETURN
+-A TRANSOCKS -d 169.254.0.0/16 -j RETURN
+-A TRANSOCKS -d 172.16.0.0/12 -j RETURN
+-A TRANSOCKS -d 192.168.0.0/16 -j RETURN
+-A TRANSOCKS -d 224.0.0.0/4 -j RETURN
+-A TRANSOCKS -d 240.0.0.0/4 -j RETURN
+-A TRANSOCKS -d 130.153.0.0/16 -j RETURN
+-A TRANSOCKS -p tcp -j REDIRECT --to-ports 1081
+-A TRANSOCKS -p icmp -j REDIRECT --to-ports 1081
 
-    [Install]
-    WantedBy=multi-user.target
-  path: /etc/systemd/system/transocks.service
-  owner: root:root
-  permissions: '0644'
-- content: |
-    *nat
-    -F
+COMMIT
+"""
+TRANSOCKS_NFTABLES_RULE = """
+table ip nat {
+        chain PREROUTING {
+                type nat hook prerouting priority -100; policy accept;
+        }
 
-    :PREROUTING ACCEPT [0:0]
-    :INPUT ACCEPT [0:0]
-    :OUTPUT ACCEPT [0:0]
-    :POSTROUTING ACCEPT [0:0]
-    :TRANSOCKS - [0:0]
-    -A OUTPUT -j TRANSOCKS
-    -A TRANSOCKS -d 0.0.0.0/8 -j RETURN
-    -A TRANSOCKS -d 10.0.0.0/8 -j RETURN
-    -A TRANSOCKS -d 127.0.0.0/8 -j RETURN
-    -A TRANSOCKS -d 169.254.0.0/16 -j RETURN
-    -A TRANSOCKS -d 172.16.0.0/12 -j RETURN
-    -A TRANSOCKS -d 192.168.0.0/16 -j RETURN
-    -A TRANSOCKS -d 224.0.0.0/4 -j RETURN
-    -A TRANSOCKS -d 240.0.0.0/4 -j RETURN
-    -A TRANSOCKS -d 130.153.0.0/16 -j RETURN
-    -A TRANSOCKS -p tcp -j REDIRECT --to-ports 1081
-    -A TRANSOCKS -p icmp -j REDIRECT --to-ports 1081
+        chain INPUT {
+                type nat hook input priority 100; policy accept;
+        }
 
-    COMMIT
-  path: /etc/ufw/before.rules
-  append: true
-  owner: root:root
-  permissions: '0640'
+        chain POSTROUTING {
+                type nat hook postrouting priority 100; policy accept;
+        }
 
-runcmd:
-- systemctl daemon-reload
-- systemctl enable transocks
-- systemctl start transocks
-- ufw enable
-- ufw allow 22
-- apt update
-- apt install -y avahi-daemon
-- systemctl enable avahi-daemon
-- systemctl start avahi-daemon
-- ufw allow 5353
+        chain OUTPUT {
+                type nat hook output priority -100; policy accept;
+                counter packets 6 bytes 389 jump TRANSOCKS
+        }
+
+        chain TRANSOCKS {
+                ip daddr 0.0.0.0/8 counter packets 0 bytes 0 return
+                ip daddr 10.0.0.0/8 counter packets 0 bytes 0 return
+                ip daddr 127.0.0.0/8 counter packets 0 bytes 0 return
+                ip daddr 169.254.0.0/16 counter packets 0 bytes 0 return
+                ip daddr 172.16.0.0/12 counter packets 0 bytes 0 return
+                ip daddr 192.168.0.0/16 counter packets 4 bytes 269 return
+                ip daddr 224.0.0.0/4 counter packets 0 bytes 0 return
+                ip daddr 240.0.0.0/4 counter packets 0 bytes 0 return
+                ip daddr 130.153.0.0/16 counter packets 1 bytes 60 return
+                meta l4proto tcp counter packets 1 bytes 60 redirect to :1081
+                meta l4proto icmp counter packets 0 bytes 0 redirect to :1081
+        }
+}
 """
 
-InstanceType = Literal["container", "virtual-machine"]
 
+def is_valid_remote(remote: str) -> TypeGuard[RemoteEnum]:
+    return remote == "ubuntu" or remote == "lxc"
+
+
+def run_cmd_with_uec_proxy_env(cmd: str):
+    return f"http_proxy={UEC_PROXY_URL} https_proxy={UEC_PROXY_URL} no_proxy={UEC_NOPROXY} HTTP_PROXY={UEC_PROXY_URL} HTTPS_PROXY={UEC_PROXY_URL} NO_PROXY={UEC_NOPROXY} {cmd}"
+
+
+def build_cloudinit_userdata_yaml(
+    default_user_name: str,
+    raw_default_user_passwd: str,
+    remote: RemoteEnum,
+    image_alias: str,
+):
+    hashed_default_user_passwd = crypt.crypt(raw_default_user_passwd)
+    userdata: UserData = {
+        "system_info": {
+            "default_user": {
+                "name": default_user_name,
+                "passwd": hashed_default_user_passwd,
+                "lock_passwd": False,
+            }
+        },
+        "ssh_pwauth": True,
+        "bootcmd": [
+            "sleep 5",  # wait a little for name resolve
+            run_cmd_with_uec_proxy_env(
+                "wget -l -P /usr/local/bin -O /usr/local/bin/transocks https://github.com/otariidae/transocks/releases/download/v1.1.1+2cf9915/transocks_x86_64"
+            ),
+            "chmod +x /usr/local/bin/transocks",
+        ],
+        "write_files": [
+            {
+                "content": 'proxy_url = "socks5://socks.cc.uec.ac.jp:1080"',
+                "path": "/etc/transocks.toml",
+                "owner": "root:root",
+                "permissions": "0644",
+            },
+            {
+                "content": TRANSOCKS_SERVICE,
+                "path": "/etc/systemd/system/transocks.service",
+                "owner": "root:root",
+                "permissions": "0644",
+            },
+        ],
+        "runcmd": [
+            "systemctl daemon-reload",
+            "systemctl enable transocks",
+            "systemctl start transocks",
+        ],
+    }
+    if remote == "ubuntu":
+        userdata["write_files"].append(
+            {
+                "content": TRANSOCKS_IPTABLES_RULE,
+                "path": "/etc/ufw/before.rules",
+                "owner": "root:root",
+                "append": True,
+                "permissions": "0640",
+            }
+        )
+        userdata["runcmd"].extend(
+            [
+                "ufw enable",
+                "ufw allow 22",
+                "ufw allow 5353",
+                "apt update",
+                "apt install -y avahi-daemon",
+            ]
+        )
+    elif image_alias.startswith("debian/buster"):
+        userdata["bootcmd"].insert(
+            0, run_cmd_with_uec_proxy_env("apt install -y wget nftables openssh-server")
+        )
+        userdata["write_files"].append(
+            {
+                "content": TRANSOCKS_NFTABLES_RULE,
+                "path": "/etc/nftables.conf",
+                "owner": "root:root",
+                "permissions": "0644",
+            }
+        )
+        userdata["runcmd"].extend(
+            [
+                "systemctl enable nftables",
+                "systemctl start nftables",
+                "apt update",
+                "apt install -y avahi-daemon",
+            ]
+        )
+    elif image_alias.startswith("archlinux"):
+        userdata["bootcmd"].insert(
+            0, run_cmd_with_uec_proxy_env("pacman -S --noconfirm wget openssh")
+        )
+        userdata["write_files"].append(
+            {
+                "content": TRANSOCKS_IPTABLES_RULE,
+                "path": "/etc/iptables/iptables.rules",
+                "owner": "root:root",
+                "permissions": "0640",
+            }
+        )
+        userdata["runcmd"].extend(
+            [
+                "systemctl enable iptables",
+                "systemctl start iptables",
+                "pacman -S --noconfirm avahi",
+            ]
+        )
+    userdata["runcmd"].extend(
+        [
+            "systemctl enable avahi-daemon",
+            "systemctl start avahi-daemon",
+        ]
+    )
+    userdata_yaml = "#cloud-config\n" + yaml.dump(userdata, width=256)
+    return userdata_yaml
+
+
+InstanceType = Literal["container", "virtual-machine"]
 
 # minimum rough type definition
 class InstancePost(TypedDict):
@@ -126,6 +249,7 @@ class RemoteImage:
     release_codename: Optional[str]
     release_title: str
     variant: Optional[str]
+    remote: RemoteEnum
 
 
 CloudinitStatus = Literal["running", "done"]
@@ -222,7 +346,22 @@ def is_available_image(image: RemoteImage) -> bool:
     return is_default_arch(image) and is_cloud_image(image)
 
 
-def product2image(product: Product) -> RemoteImage:
+def is_supported_lxc_image(image: RemoteImage) -> bool:
+    for alias in image.aliases:
+        for prefix in LXC_SUPPORTED_IMAGE_PREFIX:
+            if alias.startswith(prefix):
+                return True
+    return False
+
+
+def product2image(product: Product, ssclient: SimpleStreamsClient) -> RemoteImage:
+    remote: RemoteEnum
+    if ssclient.url == UBUNTU_IMAGE_SERVER:
+        remote = "ubuntu"
+    elif ssclient.url == LINUXCONTAINER_IMAGE_SERVER:
+        remote = "lxc"
+    else:
+        remote = "lxc"  # fallback
     return RemoteImage(
         aliases=product["aliases"].split(","),
         os=product["os"],
@@ -231,6 +370,7 @@ def product2image(product: Product) -> RemoteImage:
         release_title=product["release_title"],
         variant=product.get("variant"),
         arch=product["arch"],
+        remote=remote,
     )
 
 
@@ -238,24 +378,27 @@ def create_config(
     name: str,
     default_user_name: str,
     default_user_passwd: str,
+    remote: RemoteEnum,
     image_alias: str,
     instance_type: InstanceType,
     vcpu: Optional[int],
     memory: Optional[int],
 ):
-    hashed_default_user_passwd = crypt.crypt(default_user_passwd)
+    ssclient = remote_enum_map[remote]
     config: InstancePost = {
         "name": name,
         "config": {
-            "user.user-data": CLOUDINIT_USERDATA.format(
+            "user.user-data": build_cloudinit_userdata_yaml(
                 default_user_name=default_user_name,
-                hashed_default_user_passwd=hashed_default_user_passwd,
+                raw_default_user_passwd=default_user_passwd,
+                remote=remote,
+                image_alias=image_alias,
             ),
         },
         "source": {
             "type": "image",
             "mode": "pull",
-            "server": DEFAULT_IMAGE_SERVER,
+            "server": ssclient.url,
             "protocol": "simplestreams",
             "alias": image_alias,
         },
@@ -289,7 +432,7 @@ async def list_instances(request: Request):
 
 @app.post("/instances")
 def create_a_instance(
-    image_alias: str = Form(...),
+    os: str = Form(...),
     instance_type: InstanceType = Form(...),
     vcpu: Optional[int] = Form(None),
     memory: Optional[int] = Form(None),
@@ -297,10 +440,14 @@ def create_a_instance(
     default_user_name: str = Form(...),
     default_user_passwd: str = Form(...),
 ):
+    [remote, image_alias] = os.split(":")
+    if not is_valid_remote(remote):
+        return Response(status_code=400)
     config = create_config(
         name=name,
         default_user_name=default_user_name,
         default_user_passwd=default_user_passwd,
+        remote=remote,
         image_alias=image_alias,
         instance_type=instance_type,
         vcpu=vcpu,
@@ -320,7 +467,6 @@ def new_instance(request: Request):
     available_cpu_core = os.cpu_count()
     mem = psutil.virtual_memory()
     available_mem_megabytes = math.ceil(mem.available / 1024 / 1024)
-    print(available_mem_megabytes)
     return templates.TemplateResponse(
         "new.html",
         {
@@ -384,7 +530,17 @@ def destroy_instance(name: str):
 
 @app.get("/images")
 def list_images():
-    raw_images = ssclient.list_images()
-    images = map(product2image, raw_images)
-    available_images = list(filter(is_available_image, images))
+    raw_ubuntu_images = ubuntuSsclient.list_images()
+    raw_lxc_images = lxcSsclient.list_images()
+    ubuntu_images = map(
+        lambda product: product2image(product, ubuntuSsclient), raw_ubuntu_images
+    )
+    lxc_images = map(
+        lambda product: product2image(product, lxcSsclient), raw_lxc_images
+    )
+    available_ubuntu_images = list(filter(is_available_image, ubuntu_images))
+    available_lxc_images = list(
+        filter(is_supported_lxc_image, filter(is_available_image, lxc_images))
+    )
+    available_images = available_ubuntu_images + available_lxc_images
     return available_images
