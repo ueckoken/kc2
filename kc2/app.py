@@ -5,11 +5,13 @@ import math
 import os
 import re
 from typing import Literal, Optional, TypedDict, Union
-from fastapi import FastAPI, Request, Form
+from typing_extensions import TypeGuard
+from fastapi import FastAPI, Response, Request, Form
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 import psutil
+from .cloud_init import UserData
 from pylxd import Client  # type: ignore
 from simplesimplestreams import Product, SimpleStreamsClient
 import yaml
@@ -104,6 +106,10 @@ table ip nat {
 """
 
 
+def is_valid_remote(remote: str) -> TypeGuard[RemoteEnum]:
+    return remote == "ubuntu" or remote == "lxc"
+
+
 def run_cmd_with_uec_proxy_env(cmd: str):
     return f"http_proxy={UEC_PROXY_URL} https_proxy={UEC_PROXY_URL} no_proxy={UEC_NOPROXY} HTTP_PROXY={UEC_PROXY_URL} HTTPS_PROXY={UEC_PROXY_URL} NO_PROXY={UEC_NOPROXY} {cmd}"
 
@@ -115,7 +121,7 @@ def build_cloudinit_userdata_yaml(
     image_alias: str,
 ):
     hashed_default_user_passwd = crypt.crypt(raw_default_user_passwd)
-    userdata = {
+    userdata: UserData = {
         "system_info": {
             "default_user": {
                 "name": default_user_name,
@@ -343,6 +349,7 @@ def is_supported_lxc_image(image: RemoteImage) -> bool:
 
 
 def product2image(product: Product, ssclient: SimpleStreamsClient) -> RemoteImage:
+    remote: RemoteEnum
     if ssclient.url == UBUNTU_IMAGE_SERVER:
         remote = "ubuntu"
     elif ssclient.url == LINUXCONTAINER_IMAGE_SERVER:
@@ -428,6 +435,8 @@ def create_a_instance(
     default_user_passwd: str = Form(...),
 ):
     [remote, image_alias] = os.split(":")
+    if not is_valid_remote(remote):
+        return Response(status_code=400)
     config = create_config(
         name=name,
         default_user_name=default_user_name,
