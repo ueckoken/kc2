@@ -28,7 +28,12 @@ ubuntuSsclient = SimpleStreamsClient(url=UBUNTU_IMAGE_SERVER)
 lxcSsclient = SimpleStreamsClient(url=LINUXCONTAINER_IMAGE_SERVER)
 
 RemoteEnum = Literal["ubuntu", "lxc"]
-remote_enum_map = {"ubuntu": ubuntuSsclient, "lxc": lxcSsclient}
+remote_enum_map: dict[RemoteEnum, SimpleStreamsClient] = {
+    "ubuntu": ubuntuSsclient,
+    "lxc": lxcSsclient,
+}
+
+LXC_SUPPORTED_IMAGE_PREFIX = ["debian/buster", "archlinux"]
 
 DEFAULT_ARCH = "amd64"
 
@@ -196,7 +201,7 @@ def build_cloudinit_userdata_yaml(
                 "apt install -y avahi-daemon",
             ]
         )
-    elif image_alias.startswith("arch"):
+    elif image_alias.startswith("archlinux"):
         userdata["bootcmd"].insert(
             0, run_cmd_with_uec_proxy_env("pacman -S --noconfirm wget openssh")
         )
@@ -343,8 +348,9 @@ def is_available_image(image: RemoteImage) -> bool:
 
 def is_supported_lxc_image(image: RemoteImage) -> bool:
     for alias in image.aliases:
-        if alias.startswith("debian/buster") or alias.startswith("archlinux"):
-            return True
+        for prefix in LXC_SUPPORTED_IMAGE_PREFIX:
+            if alias.startswith(prefix):
+                return True
     return False
 
 
